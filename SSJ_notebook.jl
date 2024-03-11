@@ -1,16 +1,35 @@
 ### A Pluto.jl notebook ###
-# v0.19.37
+# v0.19.38
 
 using Markdown
 using InteractiveUtils
 
 # ╔═╡ d16f7d1b-b994-4950-bd57-e8b65265b445
-begin
-	#Lets start with loading some Julia packages that will be useful below
-	using Parameters, LinearAlgebra, SparseArrays
-	using Setfield,ForwardDiff, BasicInterpolators
-	using Roots,Plots
-end
+using Setfield: @set!
+
+# ╔═╡ 17c3ce8a-f6ce-4877-80e5-bcc7d5cb241f
+using BasicInterpolators: LinearInterpolator, NoBoundaries
+
+# ╔═╡ e1f5de7f-2f79-4347-a5c1-5fefbca387c0
+using ForwardDiff: ForwardDiff
+
+# ╔═╡ 51910340-cd95-42d4-a86f-698524419dc1
+using SparseArrays: sparse
+
+# ╔═╡ 289a93b3-35ef-4202-a842-8347bc75527e
+using LinearAlgebra: I # represents identity matrix of arbitrary size
+
+# ╔═╡ 4e059acd-8ef1-448f-84ec-068ebb8adb89
+using Roots: find_zero
+
+# ╔═╡ 9db04f04-bb3b-433a-81f6-3d9f237430a9
+using Plots: plot
+
+# ╔═╡ ead31806-1c52-4aab-848e-10fdf2459b0a
+using QuantEcon: rouwenhorst
+
+# ╔═╡ 6367fa56-1118-4ff7-98c1-a065ee82addd
+using PlutoUI: TableOfContents
 
 # ╔═╡ 8b8b913e-9758-11ee-07bc-cb7712eed09d
 md"""
@@ -33,7 +52,7 @@ The notebook assumes some familiarity with Julia and features the following part
 2. Solving/Calibrating the steady state 
 3. Implementing the SSJ method
 
-* I tried to focus more on a *clear* and *simple* implemenation instead one optimized for speed.
+* I tried to focus more on a *clear* and *simple* implementation instead one optimized for speed.
 
 
 * You'll see that once you can implement the model's steady state, getting linearized IRFs using SSJ is fairly easy.
@@ -107,43 +126,9 @@ The skill process follows an AR(1)-process in logs that will be discretized to 7
 
 """
 
-# ╔═╡ a996ab60-337a-475c-a5d2-19a25fc1ebfc
-begin
-	
-	#The code for the Rouwenhorst method below is copied from the QuantEcon.jl package.
-	#Copyright © 2013, 2014, 2015, 2016, 2017, 2018, 2019 Spencer Lyon, Thomas J. Sargent, and John Stachurski: BSD-3
-	
-	function rouwenhorst(N::Integer, ρ::Real, σ::Real, μ::Real=0.0)
-	    σ_y = σ / sqrt(1-ρ^2)
-	    p  = (1+ρ)/2
-	    ψ = sqrt(N-1) * σ_y
-	    m = μ / (1 - ρ)
-	
-	    state_values, p = _rouwenhorst(p, p, m, ψ, N)
-		
-	    return state_values, p
-	end
-	
-	function _rouwenhorst(p::Real, q::Real, m::Real, Δ::Real, n::Integer)
-	    if n == 2
-	        return [m-Δ, m+Δ],  [p 1-p; 1-q q]
-	    else
-	        _, θ_nm1 = _rouwenhorst(p, q, m, Δ, n-1)
-	        θN = p    *[θ_nm1 zeros(n-1, 1); zeros(1, n)] +
-	             (1-p)*[zeros(n-1, 1) θ_nm1; zeros(1, n)] +
-	             q    *[zeros(1, n); zeros(n-1, 1) θ_nm1] +
-	             (1-q)*[zeros(1, n); θ_nm1 zeros(n-1, 1)]
-	
-	        θN[2:end-1, :] ./= 2
-	
-	        return range(m-Δ, stop=m+Δ, length=n), θN
-	    end
-	end
-end
-
 # ╔═╡ fbccf6ee-5cd2-43ba-ba6a-f09fe219d803
-#Calibration of the model
-@with_kw struct ModelParameters{T}
+"Calibration of the model"
+Base.@kwdef struct ModelParameters{T}
 	β::T = 0.98 	#Household discount factor - will be changed by calibration
 	σ::T = 1.0   	#relative risk aversion
     δ::T = 0.025 	#capital depreciation
@@ -199,28 +184,26 @@ md"""
 """
 
 # ╔═╡ 1a7de3ab-15f3-4ce4-9ae7-5851e2fcade9
-@with_kw struct NumericalParameters{F,I}
-
+Base.@kwdef struct NumericalParameters{F,I}
 	#include instance of model parameters
 	mp::ModelParameters{F} = ModelParameters()
 
 	# specification for grids
-	na::I 	= 500 #no. of points on asset grids
-	ns::I 	= 7 	#no. of points on skill grid
-	amin::F 	= 0.0 	#borrowing limit
+	na::I 	= 500   #no. of points on asset grids
+	ns::I 	= 7     #no. of points on skill grid
+	amin::F = 0.0   #borrowing limit
 	amax::F = 100.0 #upper end grid
 
 	#set grids and transition matrix for s process
-	s_grid::Vector{F} 	= exp.(rouwenhorst(ns, mp.ρs, mp.σs)[1])
-	Ps::Matrix{F} 		= rouwenhorst(ns, mp.ρs, mp.σs)[2]
-	a_grid::Vector{F} 	= exponential_grid(amin,amax,na)
+	s_grid::Vector{F} 	= exp.(rouwenhorst(ns, mp.ρs, mp.σs).state_values)
+	Ps::Matrix{F} 		= rouwenhorst(ns, mp.ρs, mp.σs).p
+	a_grid::Vector{F} 	= exponential_grid(amin, amax, na)
 
 	#tolerance value for HH problem
 	tolHH::F = 1e-10
 
 	#size of Sequence Space Jacobians
 	T::I = 300
-	
 end
 
 # ╔═╡ f21c5612-cc36-4c38-88a3-2c52d80f1e11
@@ -234,13 +217,17 @@ For given **next period** marginal value functions/consumption policy functions,
 Below find the function for the main iterative loop:
 """
 
-# ╔═╡ 0196e8aa-b700-4b96-9453-7dd591067521
-begin #begin code block
-	
+# ╔═╡ 37213ced-a460-40ee-9bd5-fd23d127c8f5
+#"""compute expected marginal value function"""
+function update_EVa(cpol::AbstractArray,r::T,np::NumericalParameters) where T<:Real
+    return (1.0+r)*((cpol.^(-np.mp.σ)))*np.Ps'   
+end
+
+# ╔═╡ eedf7b40-aa00-4df2-a750-a5f6edddf627
 function EGM_update(cPrime::AbstractArray,w,r,rPrime,np::NumericalParameters)
 
-    @unpack mp,a_grid,s_grid,ns,na,amin = np
-    @unpack β,σ = mp
+    (; mp, a_grid, s_grid, ns, na, amin) = np
+    (; β, σ) = mp
 
 	#get
     EVa = update_EVa(cPrime,rPrime,np)
@@ -279,18 +266,11 @@ function EGM_update(cPrime::AbstractArray,w,r,rPrime,np::NumericalParameters)
     end
 
 	#back out consumption from budget constraint
-	c = (1+r)*a_grid .+ inc' .- aPrime
+	c = (1+r) * a_grid .+ inc' .- aPrime
    
-    return c,aPrime 
+    return c, aPrime 
 
 end
-
-#compute expected marginal value function
-function update_EVa(cpol::AbstractArray,r::T,np::NumericalParameters) where T<:Real
-    return (1.0+r)*((cpol.^(-np.mp.σ)))*np.Ps'   
-end
-	
-end #end code block
 
 # ╔═╡ 0ea09255-d6bf-4157-a4f4-f014894f96fe
 md"""
@@ -298,7 +278,7 @@ For solving the household problem in steady state, we keep iterating on this fun
 """
 
 # ╔═╡ f9d864a1-df93-4acb-b9a1-dcae9f650594
-function solve_EGM_SS(cGuess::AbstractArray,wSS,rSS,np::NumericalParameters;  
+function solve_EGM_SS(cGuess::AbstractArray, wSS, rSS, np::NumericalParameters;  
     max_iter::Int = 3000, print::Bool = false)
 
     c0 = cGuess  
@@ -308,11 +288,11 @@ function solve_EGM_SS(cGuess::AbstractArray,wSS,rSS,np::NumericalParameters;
     dist = 1.0; iter = 0
     while (dist>np.tolHH) & (iter < max_iter)
 
-	    c1, a1 = EGM_update(c0,wSS,rSS,rSS,np)
+	    c1, a1 = EGM_update(c0, wSS, rSS, rSS, np)
 	
 	    dist = maximum(abs.(c1 .- c0))
 	
-	    if print & (rem(iter,100) == 0.0)
+	    if print & (rem(iter, 100) == 0.0)
 	    	println("iteration: ",iter," current distance: ",dist)
 	    end
 	
@@ -337,24 +317,19 @@ md"""
 For convenience, lets also generate a version of the function that starts with some specified guess:
 """
 
-# ╔═╡ 2b27458d-b960-4482-a4a3-91c83eeea2fe
-begin #begin codeblock
-
-	
+# ╔═╡ 1fb98a85-34f5-43ed-9047-40e156d2e87e
 function get_cguess(w,r,np)
 	incs = w*np.s_grid 
  	return 0.1 .+ 0.1*((1+r)*np.a_grid .+ incs')
 end
 
-	
+# ╔═╡ 84c86387-7c0b-4a54-b2ee-3bd369b33e5e
 function solve_EGM_SS(wSS,rSS,np::NumericalParameters; max_iter::Int = 3000, print::Bool = false)
 
 	c_guess = get_cguess(wSS,rSS,np)
 	
 	return solve_EGM_SS(c_guess,wSS,rSS,np, max_iter = max_iter, print = print)
 end
-
-end #end codeblock
 
 # ╔═╡ adb024cf-37d9-48bd-a8b6-5974aa23c8db
 md"""
@@ -394,7 +369,7 @@ Practically, we approximate the continous wealth distribution with a discrete on
 # ╔═╡ 762af298-c4bc-400d-b8c6-7bbd135d2ffa
 function build_Λ(a_choice::Matrix, np::NumericalParameters)
 
-    @unpack  na, ns, a_grid, Ps = np
+    (; na, ns, a_grid, Ps) = np
 
 	#pre-allocate arrays
     weights_R = zeros(eltype(a_choice),na*ns,ns)
@@ -466,12 +441,15 @@ md"""
 """
 
 # ╔═╡ 108071dd-fb5b-4c25-a062-62a00b58e55f
+"Computing the stationary distribution of a Markov Chain with a sparse transition matrix
+
+[source](https://discourse.julialang.org/t/stationary-distribution-with-sparse-transition-matrix/40301/3)
+"
 function inv_dist(Π::AbstractArray)
 	#Π is a Stochastic Matrix
     x = [1; (I - Π'[2:end,2:end]) \ Vector(Π'[2:end,1])]
     return  x./sum(x) #normalize so that vector sums up to 1.
 end
-#taken from https://discourse.julialang.org/t/stationary-distribution-with-sparse-transition-matrix/40301/3
 
 # ╔═╡ 197230d2-3323-44ea-87a0-16063711ee7a
 md"""
@@ -488,77 +466,68 @@ We are now ready to calibrate/solve for the model's steady state. As in the ABRS
 
 """
 
-# ╔═╡ c4b23337-d8e1-4838-abd5-2820069aead9
-begin #begin code block
+# ╔═╡ 8e296503-bde8-4d4f-b18f-53a34e3fe8c8
+function β_objective(β,K_target,r_ss,w_ss,np)
 
-	#Note: Since NumericalParameters is an immutable struct, I use @set!
-	#rom the Setfield package to change its elements.
+	@set! np.mp.β = β
+
+	#solve HH problem
+	c_ss, a_ss = solve_EGM_SS(w_ss,r_ss,np)
+
+	#build transition matrix
+	Λ =  build_Λ(a_ss, np)
+
+	#get invariant distribution
+	D = inv_dist(Λ)
+
+	#aggregate capital stock implied by HH savings
+	K_ss = sum(reshape(D,(np.na,np.ns)).*np.a_grid)
+
+	#return relative distance to target
+	return (K_ss/K_target) - 1	
+end
+
+# ╔═╡ e6172cbd-a77f-4e00-b40f-596fa15caaeb
+# Note: Since NumericalParameters is an immutable struct, I use @set!
+# from the Setfield package to change its elements.
 	
-	function get_steady_state(r_target,np::NumericalParameters)
+function get_steady_state(r_target,np::NumericalParameters)
 
-		#unpack objects
-		@unpack mp, s_grid, na, ns = np
-		@unpack δ, α = mp
-
-
-		#compute steady state labor supply
-		s_dist = inv_dist(np.Ps) #invariant distribution over s
-		L = s_dist'*s_grid 		 #aggregate labor supply
-
-		#normalize steady state labor supply to one
-		@set! np.s_grid = np.s_grid./L ; L = 1.0
-
-		#get steady state K/Y ratio implied by r target
-		KoverY_ss = α/(r_target + δ)
-		K_ss = KoverY_ss #due to Y = 1 normalization
-
-		#choose Z_ss so that indeed Y=1
-		@set! np.mp.Z_ss = 1/(K_ss^α * L^(1-α))
-
-		#get corresponding steady state wage
-		w_ss = (1-α)*np.mp.Z_ss*(K_ss/L)^(α)
-
-		#calibrate β - uses β in np struct as initial guess
-		β = find_zero(b -> β_objective(b,K_ss,r_target,w_ss,np),np.mp.β)
-
-		@set! np.mp.β = β
-
-		#get remaining steady state objectives for correct β
-		c_ss, a_ss = solve_EGM_SS(w_ss,r_target,np)
-
-		#get distribution as (na × ns matrix)
-		D_ss = reshape(inv_dist(build_Λ(a_ss, np)),(na,ns))
-
-		return K_ss, L, w_ss, c_ss, a_ss, D_ss, np
-
-	end
+	#unpack objects
+	(; mp, s_grid, na, ns) = np
+	(; δ, α) = mp
 
 
-	
-	function β_objective(β,K_target,r_ss,w_ss,np)
+	#compute steady state labor supply
+	s_dist = inv_dist(np.Ps) #invariant distribution over s
+	L = s_dist'*s_grid 		 #aggregate labor supply
 
-		@set! np.mp.β = β
+	#normalize steady state labor supply to one
+	@set! np.s_grid = np.s_grid./L ; L = 1.0
 
-		#solve HH problem
-		c_ss, a_ss = solve_EGM_SS(w_ss,r_ss,np)
+	#get steady state K/Y ratio implied by r target
+	KoverY_ss = α/(r_target + δ)
+	K_ss = KoverY_ss #due to Y = 1 normalization
 
-		#build transition matrix
-		Λ =  build_Λ(a_ss, np)
+	#choose Z_ss so that indeed Y=1
+	@set! np.mp.Z_ss = 1/(K_ss^α * L^(1-α))
 
-		#get invariant distribution
-		D = inv_dist(Λ)
+	#get corresponding steady state wage
+	w_ss = (1-α)*np.mp.Z_ss*(K_ss/L)^(α)
 
-		#aggregate capital stock implied by HH savings
-		K_ss = sum(reshape(D,(np.na,np.ns)).*np.a_grid)
+	#calibrate β - uses β in np struct as initial guess
+	β = find_zero(b -> β_objective(b,K_ss,r_target,w_ss,np),np.mp.β)
 
-		#return relative distance to target
-		return (K_ss/K_target) - 1
-		
-	end
+	@set! np.mp.β = β
 
+	#get remaining steady state objectives for correct β
+	c_ss, a_ss = solve_EGM_SS(w_ss,r_target,np)
 
+	#get distribution as (na × ns matrix)
+	D_ss = reshape(inv_dist(build_Λ(a_ss, np)),(na,ns))
 
-end #end code block
+	return K_ss, L, w_ss, c_ss, a_ss, D_ss, np
+end
 
 # ╔═╡ ce219259-f7a8-43e6-89d9-de8787644046
 md"""
@@ -620,7 +589,6 @@ function get_𝓔(Λ,y_ss,np::NumericalParameters)
 	end
 
 	return 𝓔
-	
 end
 
 # ╔═╡ c76e1c3c-ded9-4fcc-971b-fd011178acae
@@ -628,82 +596,69 @@ md"""
 That is pretty simple. For the objects they denote as $\mathcal{Y}$ and $\mathcal{D}$, we need to conduct the backward iteration:
 """
 
-# ╔═╡ 7d30a56b-ab2c-43b9-a894-8aedcd115aff
-begin
+# ╔═╡ b6a0da97-2907-4bd1-9b9a-3469734a9013
+"function that conducts the backwards iterations, taking as inputs the SS and perturbations of w and r"
+function backward_objective(dx_w,dx_r,c_ss,w_ss,r_ss,D_ss,np::NumericalParameters)
 
-
-	function get_𝒴_𝒟(c_ss,w_ss,r_ss,D_ss,np::NumericalParameters)
-
-		@unpack T, na, ns = np
-
-		#objective function to be differentiated
-		obj_fun(x) = backward_objective(x[1],x[2],c_ss,w_ss,r_ss,D_ss,np::NumericalParameters)
-
-		#automatic differentiation using ForwardDiff
-		derivs = ForwardDiff.jacobian(x -> obj_fun(x),zeros(2))
-
-		#note given way the outputs of obj_fun are saved, need to flip arrays
-		#(done by reverse())
-		𝒴_w = reverse(derivs[1:T,1])  
-		𝒟_w = reverse(reshape(derivs[(T+1):end,1],(na*ns,T)),dims=2)
-		𝒴_r = reverse(derivs[1:T,2])  
-		𝒟_r = reverse(reshape(derivs[(T+1):end,2],(na*ns,T)),dims=2)
+	#Note: dx_w and dx_r are the perturbations to the wage and interest rate 
+	#T periods in advance
 	
-		return 𝒴_w, 𝒟_w,𝒴_r, 𝒟_r
-		
-	end
+	(; T) = np
 
-	#function that conducts the backwards iterations, taking as inputs the SS and perturbations of w and r
+	type_ind = dx_w+dx_r #get type of perturbance to initialize containers
 
-	function backward_objective(dx_w,dx_r,c_ss,w_ss,r_ss,D_ss,np::NumericalParameters)
+	#initialize containers
+	K_terms = zeros(eltype(type_ind),T)
+	D_terms = zeros(eltype(type_ind),length(D_ss),T)
 
-		#Note: dx_w and dx_r are the perturbations to the wage and interest rate 
-		#T periods in advance
-		
-		@unpack T = np
+	#get values for re-centering 
+	#(cf. Appendix C of Auclert et al. (2021))
+	c_nc = EGM_update(c_ss,w_ss,r_ss,r_ss,np)[1]
+	
+	c_rc = c_ss
 
-		type_ind = dx_w+dx_r #get type of perturbance to initialize containers
-
-		#initialize containers
-		K_terms = zeros(eltype(type_ind),T)
-		D_terms = zeros(eltype(type_ind),length(D_ss),T)
-
-		#get values for re-centering 
-		#(cf. Appendix C of Auclert et al. (2021))
-		c_nc = EGM_update(c_ss,w_ss,r_ss,r_ss,np)[1]
-		
-		c_rc = c_ss
-
-		#backward iteration
-		for tt in Iterators.reverse(1:T)
-
-			if tt==T
-
-				c_t, aPrime_t = EGM_update(c_rc,w_ss + dx_w,r_ss + dx_r,r_ss,np)
-
-			elseif tt == (T-1)
-
-				c_t, aPrime_t = EGM_update(c_rc,w_ss,r_ss,r_ss + dx_r,np)
-
-			else
-
-				c_t, aPrime_t = EGM_update(c_rc,w_ss,r_ss,r_ss,np)
-
-			end
-
-			Λ = build_Λ(aPrime_t,np)
-
-			 K_terms[tt] = (aPrime_t[:])'*D_ss[:]
-			 D_terms[:,tt] = Λ'*D_ss[:]
-
-			#do re-centering
-			c_rc = c_ss .+ (c_t .- c_nc)
-
+	#backward iteration
+	for tt in Iterators.reverse(1:T)
+		if tt==T
+			c_t, aPrime_t = EGM_update(c_rc,w_ss + dx_w,r_ss + dx_r,r_ss,np)
+		elseif tt == (T-1)
+			c_t, aPrime_t = EGM_update(c_rc,w_ss,r_ss,r_ss + dx_r,np)
+		else
+			c_t, aPrime_t = EGM_update(c_rc,w_ss,r_ss,r_ss,np)
 		end
 
-		return vcat(K_terms,D_terms[:])
+		Λ = build_Λ(aPrime_t,np)
+
+		K_terms[tt] = (aPrime_t[:])'*D_ss[:]
+		D_terms[:,tt] = Λ'*D_ss[:]
+
+		#do re-centering
+		c_rc = c_ss .+ (c_t .- c_nc)
 	end
 
+	return vcat(K_terms,D_terms[:])
+end
+
+# ╔═╡ 08e8a1b7-181a-4b14-960f-511de6a94b13
+function get_𝒴_𝒟(c_ss,w_ss,r_ss,D_ss,np::NumericalParameters)
+
+	(; T, na, ns) = np
+
+	#objective function to be differentiated
+	obj_fun(x) = backward_objective(x[1],x[2],c_ss,w_ss,r_ss,D_ss,np::NumericalParameters)
+
+	#automatic differentiation using ForwardDiff
+	derivs = ForwardDiff.jacobian(x -> obj_fun(x),zeros(2))
+
+	#note given way the outputs of obj_fun are saved, need to flip arrays
+	#(done by reverse())
+	𝒴_w = reverse(derivs[1:T,1])  
+	𝒟_w = reverse(reshape(derivs[(T+1):end,1],(na*ns,T)),dims=2)
+	𝒴_r = reverse(derivs[1:T,2])  
+	𝒟_r = reverse(reshape(derivs[(T+1):end,2],(na*ns,T)),dims=2)
+	
+	return 𝒴_w, 𝒟_w,𝒴_r, 𝒟_r
+		
 end
 
 # ╔═╡ f30878da-9b59-4364-a8e4-8bc7ba25d42a
@@ -775,8 +730,8 @@ Now, let's get the general equilibrium Jacobian by accumulating along the DAG in
 # ╔═╡ 988d6911-7739-47a4-92ed-b060522809db
 begin
 
-@unpack mp,T = np
-@unpack α, δ, Z_ss = mp
+(; mp,T) = np
+(; α, δ, Z_ss) = mp
 
 L_ss = L
 	
@@ -837,14 +792,35 @@ md"""
 We get something that looks like Figure 1 in ABRS and can declare victory! It seems ABRS specify TFP to follow a an AR(1) in levels, the figures look slightly different when using a process in logs. 
 """
 
+# ╔═╡ 6dcbe44e-4329-47f8-b817-1913aad8fbd0
+md"""
+# Appendix
+"""
+
+# ╔═╡ c763fb8e-bee0-44ff-9184-10e600bfc929
+TableOfContents()
+
+# ╔═╡ b5f699f9-e3c5-4e48-86d7-edbf384031c3
+md"""
+## Loading some packages
+"""
+
+# ╔═╡ af371420-fde7-4eb8-9fa0-0c1415eb51a1
+md"""
+Lets start with loading some Julia packages that will be useful below
+
+For transparency, I only load specific functions from a package (`using CoolPackage: cool_function`), for prototyping you could have used `using CoolPackage` to load all functions from that package.
+"""
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 BasicInterpolators = "26cce99e-4866-4b6d-ab74-862489e035e0"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+QuantEcon = "fcd29c91-0bd7-5a09-975d-7ac3f643a60c"
 Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
 Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
@@ -852,8 +828,9 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 [compat]
 BasicInterpolators = "~0.7.1"
 ForwardDiff = "~0.10.36"
-Parameters = "~0.12.3"
 Plots = "~1.39.0"
+PlutoUI = "~0.7.58"
+QuantEcon = "~0.16.6"
 Roots = "~2.0.22"
 Setfield = "~1.1.1"
 """
@@ -862,13 +839,70 @@ Setfield = "~1.1.1"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.10.2"
+julia_version = "1.10.1"
 manifest_format = "2.0"
-project_hash = "415482950331534107868ce9a0100e469d5eaec6"
+project_hash = "fd35df27a11b4e4e6c9a3fc80460c200176108cd"
+
+[[deps.AbstractFFTs]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "d92ad398961a3ed262d8bf04a1a2b8340f915fef"
+uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
+version = "1.5.0"
+weakdeps = ["ChainRulesCore", "Test"]
+
+    [deps.AbstractFFTs.extensions]
+    AbstractFFTsChainRulesCoreExt = "ChainRulesCore"
+    AbstractFFTsTestExt = "Test"
+
+[[deps.AbstractPlutoDingetjes]]
+deps = ["Pkg"]
+git-tree-sha1 = "0f748c81756f2e5e6854298f11ad8b2dfae6911a"
+uuid = "6e696c72-6542-2067-7265-42206c756150"
+version = "1.3.0"
+
+[[deps.Adapt]]
+deps = ["LinearAlgebra", "Requires"]
+git-tree-sha1 = "e2a9873379849ce2ac9f9fa34b0e37bde5d5fe0a"
+uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+version = "4.0.2"
+weakdeps = ["StaticArrays"]
+
+    [deps.Adapt.extensions]
+    AdaptStaticArraysExt = "StaticArrays"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
 version = "1.1.1"
+
+[[deps.ArnoldiMethod]]
+deps = ["LinearAlgebra", "Random", "StaticArrays"]
+git-tree-sha1 = "62e51b39331de8911e4a7ff6f5aaf38a5f4cc0ae"
+uuid = "ec485272-7323-5ecc-a04f-4719b315124d"
+version = "0.2.0"
+
+[[deps.ArrayInterface]]
+deps = ["Adapt", "LinearAlgebra", "Requires", "SparseArrays", "SuiteSparse"]
+git-tree-sha1 = "881e43f1aa014a6f75c8fc0847860e00a1500846"
+uuid = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
+version = "7.8.0"
+
+    [deps.ArrayInterface.extensions]
+    ArrayInterfaceBandedMatricesExt = "BandedMatrices"
+    ArrayInterfaceBlockBandedMatricesExt = "BlockBandedMatrices"
+    ArrayInterfaceCUDAExt = "CUDA"
+    ArrayInterfaceGPUArraysCoreExt = "GPUArraysCore"
+    ArrayInterfaceReverseDiffExt = "ReverseDiff"
+    ArrayInterfaceStaticArraysCoreExt = "StaticArraysCore"
+    ArrayInterfaceTrackerExt = "Tracker"
+
+    [deps.ArrayInterface.weakdeps]
+    BandedMatrices = "aae01518-5342-5314-be14-df237901396f"
+    BlockBandedMatrices = "ffab5731-97b5-5995-9138-79e8c1846df0"
+    CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+    GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
+    ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
+    StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
+    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
 
 [[deps.Artifacts]]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
@@ -881,6 +915,12 @@ deps = ["LinearAlgebra", "Memoize", "Random"]
 git-tree-sha1 = "3f7be532673fc4a22825e7884e9e0e876236b12a"
 uuid = "26cce99e-4866-4b6d-ab74-862489e035e0"
 version = "0.7.1"
+
+[[deps.BenchmarkTools]]
+deps = ["JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
+git-tree-sha1 = "f1dff6729bc61f4d49e140da1af55dcd1ac97b2f"
+uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+version = "1.5.0"
 
 [[deps.BitFlags]]
 git-tree-sha1 = "2dc09997850d68179b69dafb58ae806167a32b1b"
@@ -899,6 +939,12 @@ git-tree-sha1 = "4b859a208b2397a7a623a03449e4636bdb17bcf2"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
 version = "1.16.1+1"
 
+[[deps.Calculus]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "f641eb0a4f00c343bbc32346e1217b86f3ce9dad"
+uuid = "49dc2e85-a5d0-5ad3-a950-438e2897f1b9"
+version = "0.5.1"
+
 [[deps.ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra"]
 git-tree-sha1 = "e0af648f0692ec1691b5d094b8724ba1346281cf"
@@ -908,6 +954,12 @@ weakdeps = ["SparseArrays"]
 
     [deps.ChainRulesCore.extensions]
     ChainRulesCoreSparseArraysExt = "SparseArrays"
+
+[[deps.CodecBzip2]]
+deps = ["Bzip2_jll", "Libdl", "TranscodingStreams"]
+git-tree-sha1 = "9b1ca1aa6ce3f71b3d1840c538a8210a043625eb"
+uuid = "523fee87-0ab8-5b00-afb7-3ecf72e48cfd"
+version = "0.8.2"
 
 [[deps.CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]
@@ -994,6 +1046,12 @@ git-tree-sha1 = "d05d9e7b7aedff4e5b51a029dced05cfb6125781"
 uuid = "d38c429a-6771-53c6-b99e-75d170b6e991"
 version = "0.6.2"
 
+[[deps.DSP]]
+deps = ["Compat", "FFTW", "IterTools", "LinearAlgebra", "Polynomials", "Random", "Reexport", "SpecialFunctions", "Statistics"]
+git-tree-sha1 = "f7f4319567fe769debfcf7f8c03d8da1dd4e2fb0"
+uuid = "717857b8-e6f2-59f4-9121-6e50c889abd2"
+version = "0.7.9"
+
 [[deps.DataAPI]]
 git-tree-sha1 = "8da84edb865b0b5b0100c0666a9bc9a0b71c553c"
 uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
@@ -1027,6 +1085,26 @@ git-tree-sha1 = "23163d55f885173722d1e4cf0f6110cdbaf7e272"
 uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
 version = "1.15.1"
 
+[[deps.Distributed]]
+deps = ["Random", "Serialization", "Sockets"]
+uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+
+[[deps.Distributions]]
+deps = ["FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SpecialFunctions", "Statistics", "StatsAPI", "StatsBase", "StatsFuns"]
+git-tree-sha1 = "7c302d7a5fec5214eb8a5a4c466dcf7a51fcf169"
+uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
+version = "0.25.107"
+
+    [deps.Distributions.extensions]
+    DistributionsChainRulesCoreExt = "ChainRulesCore"
+    DistributionsDensityInterfaceExt = "DensityInterface"
+    DistributionsTestExt = "Test"
+
+    [deps.Distributions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    DensityInterface = "b429d917-457f-4dbc-8f4c-0cc954292b1d"
+    Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
 [[deps.DocStringExtensions]]
 deps = ["LibGit2"]
 git-tree-sha1 = "2fb1e02f2b635d0845df5d7c167fec4dd739b00d"
@@ -1037,6 +1115,12 @@ version = "0.9.3"
 deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.6.0"
+
+[[deps.DualNumbers]]
+deps = ["Calculus", "NaNMath", "SpecialFunctions"]
+git-tree-sha1 = "5837a837389fccf076445fce071c8ddaea35a566"
+uuid = "fa6b7ba4-c1ee-5f82-b5fc-ecf0adba8f74"
+version = "0.6.8"
 
 [[deps.EpollShim_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1068,8 +1152,48 @@ git-tree-sha1 = "466d45dc38e15794ec7d5d63ec03d776a9aff36e"
 uuid = "b22a6f82-2f65-5046-a5b2-351ab43fb4e5"
 version = "4.4.4+1"
 
+[[deps.FFTW]]
+deps = ["AbstractFFTs", "FFTW_jll", "LinearAlgebra", "MKL_jll", "Preferences", "Reexport"]
+git-tree-sha1 = "4820348781ae578893311153d69049a93d05f39d"
+uuid = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+version = "1.8.0"
+
+[[deps.FFTW_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "c6033cc3892d0ef5bb9cd29b7f2f0331ea5184ea"
+uuid = "f5851436-0d7a-5f13-b9de-f02708fd171a"
+version = "3.3.10+0"
+
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
+
+[[deps.FillArrays]]
+deps = ["LinearAlgebra", "Random"]
+git-tree-sha1 = "5b93957f6dcd33fc343044af3d48c215be2562f1"
+uuid = "1a297f60-69ca-5386-bcde-b61e274b549b"
+version = "1.9.3"
+weakdeps = ["PDMats", "SparseArrays", "Statistics"]
+
+    [deps.FillArrays.extensions]
+    FillArraysPDMatsExt = "PDMats"
+    FillArraysSparseArraysExt = "SparseArrays"
+    FillArraysStatisticsExt = "Statistics"
+
+[[deps.FiniteDiff]]
+deps = ["ArrayInterface", "LinearAlgebra", "Requires", "Setfield", "SparseArrays"]
+git-tree-sha1 = "73d1214fec245096717847c62d389a5d2ac86504"
+uuid = "6a86dc24-6348-571c-b903-95158fe2bd41"
+version = "2.22.0"
+
+    [deps.FiniteDiff.extensions]
+    FiniteDiffBandedMatricesExt = "BandedMatrices"
+    FiniteDiffBlockBandedMatricesExt = "BlockBandedMatrices"
+    FiniteDiffStaticArraysExt = "StaticArrays"
+
+    [deps.FiniteDiff.weakdeps]
+    BandedMatrices = "aae01518-5342-5314-be14-df237901396f"
+    BlockBandedMatrices = "ffab5731-97b5-5995-9138-79e8c1846df0"
+    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [[deps.FixedPointNumbers]]
 deps = ["Statistics"]
@@ -1094,12 +1218,10 @@ deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "Lo
 git-tree-sha1 = "cf0fe81336da9fb90944683b8c41984b08793dad"
 uuid = "f6369f11-7733-5829-9624-2563aa707210"
 version = "0.10.36"
+weakdeps = ["StaticArrays"]
 
     [deps.ForwardDiff.extensions]
     ForwardDiffStaticArraysExt = "StaticArrays"
-
-    [deps.ForwardDiff.weakdeps]
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [[deps.FreeType2_jll]]
 deps = ["Artifacts", "Bzip2_jll", "JLLWrappers", "Libdl", "Zlib_jll"]
@@ -1153,6 +1275,12 @@ git-tree-sha1 = "344bf40dcab1073aca04aa0df4fb092f920e4011"
 uuid = "3b182d85-2403-5c21-9c21-1e1f0cc25472"
 version = "1.3.14+0"
 
+[[deps.Graphs]]
+deps = ["ArnoldiMethod", "Compat", "DataStructures", "Distributed", "Inflate", "LinearAlgebra", "Random", "SharedArrays", "SimpleTraits", "SparseArrays", "Statistics"]
+git-tree-sha1 = "899050ace26649433ef1af25bc17a815b3db52b7"
+uuid = "86223c79-3864-5bf0-83f7-82e725a168b6"
+version = "1.9.0"
+
 [[deps.Grisu]]
 git-tree-sha1 = "53bb909d1151e57e2484c3d1b53e19552b887fb2"
 uuid = "42e2da0e-8278-4e71-bc24-59509adca0fe"
@@ -1170,6 +1298,46 @@ git-tree-sha1 = "129acf094d168394e80ee1dc4bc06ec835e510a3"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "2.8.1+1"
 
+[[deps.HypergeometricFunctions]]
+deps = ["DualNumbers", "LinearAlgebra", "OpenLibm_jll", "SpecialFunctions"]
+git-tree-sha1 = "f218fe3736ddf977e0e772bc9a586b2383da2685"
+uuid = "34004b35-14d8-5ef3-9330-4cdb6864b03a"
+version = "0.3.23"
+
+[[deps.Hyperscript]]
+deps = ["Test"]
+git-tree-sha1 = "179267cfa5e712760cd43dcae385d7ea90cc25a4"
+uuid = "47d2ed2b-36de-50cf-bf87-49c2cf4b8b91"
+version = "0.0.5"
+
+[[deps.HypertextLiteral]]
+deps = ["Tricks"]
+git-tree-sha1 = "7134810b1afce04bbc1045ca1985fbe81ce17653"
+uuid = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
+version = "0.9.5"
+
+[[deps.IOCapture]]
+deps = ["Logging", "Random"]
+git-tree-sha1 = "8b72179abc660bfab5e28472e019392b97d0985c"
+uuid = "b5f81e59-6552-4d32-b1f0-c071b021bf89"
+version = "0.2.4"
+
+[[deps.Inflate]]
+git-tree-sha1 = "ea8031dea4aff6bd41f1df8f2fdfb25b33626381"
+uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
+version = "0.1.4"
+
+[[deps.IntegerMathUtils]]
+git-tree-sha1 = "b8ffb903da9f7b8cf695a8bead8e01814aa24b30"
+uuid = "18e54dd8-cb9d-406c-a71d-865a43cbb235"
+version = "0.1.2"
+
+[[deps.IntelOpenMP_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "5fdf2fe6724d8caabf43b557b84ce53f3b7e2f6b"
+uuid = "1d5cc7b8-4909-519e-a0f8-d0f5ad9712d0"
+version = "2024.0.2+0"
+
 [[deps.InteractiveUtils]]
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
@@ -1178,6 +1346,11 @@ uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 git-tree-sha1 = "630b497eafcc20001bba38a4651b327dcfc491d2"
 uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
 version = "0.2.2"
+
+[[deps.IterTools]]
+git-tree-sha1 = "42d5f897009e7ff2cf88db414a389e5ed1bdd023"
+uuid = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
+version = "1.10.0"
 
 [[deps.JLFzf]]
 deps = ["Pipe", "REPL", "Random", "fzf_jll"]
@@ -1245,6 +1418,10 @@ version = "0.16.1"
     [deps.Latexify.weakdeps]
     DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
     SymEngine = "123dc426-2d89-5057-bbad-38513e3affd8"
+
+[[deps.LazyArtifacts]]
+deps = ["Artifacts", "Pkg"]
+uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -1321,6 +1498,12 @@ git-tree-sha1 = "7f3efec06033682db852f8b3bc3c1d2b0a0ab066"
 uuid = "38a345b3-de98-5d2b-a5d3-14cd9215e700"
 version = "2.36.0+0"
 
+[[deps.LineSearches]]
+deps = ["LinearAlgebra", "NLSolversBase", "NaNMath", "Parameters", "Printf"]
+git-tree-sha1 = "7bbea35cec17305fc70a0e5b4641477dc0789d9d"
+uuid = "d3d80556-e9d4-5f37-9878-2ab0fcc64255"
+version = "7.2.0"
+
 [[deps.LinearAlgebra]]
 deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
 uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -1350,6 +1533,17 @@ git-tree-sha1 = "c1dd6d7978c12545b4179fb6153b9250c96b0075"
 uuid = "e6f89c97-d47a-5376-807f-9c37f3926c36"
 version = "1.0.3"
 
+[[deps.MIMEs]]
+git-tree-sha1 = "65f28ad4b594aebe22157d6fac869786a255b7eb"
+uuid = "6c6e2e6c-3030-632d-7369-2d6c69616d65"
+version = "0.1.4"
+
+[[deps.MKL_jll]]
+deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl"]
+git-tree-sha1 = "72dc3cf284559eb8f53aa593fe62cb33f83ed0c0"
+uuid = "856f044c-d86e-5d09-b602-aeab76dc8ba7"
+version = "2024.0.0+0"
+
 [[deps.MacroTools]]
 deps = ["Markdown", "Random"]
 git-tree-sha1 = "9ee1618cbf5240e6d4e0371d6f24065083f60c48"
@@ -1359,6 +1553,12 @@ version = "0.5.11"
 [[deps.Markdown]]
 deps = ["Base64"]
 uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
+
+[[deps.MathOptInterface]]
+deps = ["BenchmarkTools", "CodecBzip2", "CodecZlib", "DataStructures", "ForwardDiff", "JSON", "LinearAlgebra", "MutableArithmetics", "NaNMath", "OrderedCollections", "PrecompileTools", "Printf", "SparseArrays", "SpecialFunctions", "Test", "Unicode"]
+git-tree-sha1 = "679c1aec6934d322783bd15db4d18f898653be4f"
+uuid = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+version = "1.27.0"
 
 [[deps.MbedTLS]]
 deps = ["Dates", "MbedTLS_jll", "MozillaCACerts_jll", "NetworkOptions", "Random", "Sockets"]
@@ -1394,6 +1594,34 @@ uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 version = "2023.1.10"
+
+[[deps.MutableArithmetics]]
+deps = ["LinearAlgebra", "SparseArrays", "Test"]
+git-tree-sha1 = "302fd161eb1c439e4115b51ae456da4e9984f130"
+uuid = "d8a4904e-b15c-11e9-3269-09a3773c0cb0"
+version = "1.4.1"
+
+[[deps.NLSolversBase]]
+deps = ["DiffResults", "Distributed", "FiniteDiff", "ForwardDiff"]
+git-tree-sha1 = "a0b464d183da839699f4c79e7606d9d186ec172c"
+uuid = "d41bc354-129a-5804-8e4c-c37616107c6c"
+version = "7.8.3"
+
+[[deps.NLopt]]
+deps = ["NLopt_jll"]
+git-tree-sha1 = "d1d09c342c3dd9b3bae985b088bd928632e4d79e"
+uuid = "76087f3c-5699-56af-9a33-bf431cd00edd"
+version = "1.0.1"
+weakdeps = ["MathOptInterface"]
+
+    [deps.NLopt.extensions]
+    NLoptMathOptInterfaceExt = ["MathOptInterface"]
+
+[[deps.NLopt_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "9b1f15a08f9d00cdb2761dcfa6f453f5d0d6f973"
+uuid = "079eb43e-fd8e-5478-9966-2cf3e3edb778"
+version = "2.7.1+0"
 
 [[deps.NaNMath]]
 deps = ["OpenLibm_jll"]
@@ -1439,6 +1667,12 @@ git-tree-sha1 = "13652491f6856acfd2db29360e1bbcd4565d04f1"
 uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
 version = "0.5.5+0"
 
+[[deps.Optim]]
+deps = ["Compat", "FillArrays", "ForwardDiff", "LineSearches", "LinearAlgebra", "MathOptInterface", "NLSolversBase", "NaNMath", "Parameters", "PositiveFactorizations", "Printf", "SparseArrays", "StatsBase"]
+git-tree-sha1 = "d024bfb56144d947d4fafcd9cb5cafbe3410b133"
+uuid = "429524aa-4258-5aef-a3af-852621145aeb"
+version = "1.9.2"
+
 [[deps.Opus_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "51a08fb14ec28da2ec7a927c4337e4332c2a4720"
@@ -1454,6 +1688,12 @@ version = "1.6.3"
 deps = ["Artifacts", "Libdl"]
 uuid = "efcefdf7-47ab-520b-bdef-62a2eaa19f15"
 version = "10.42.0+1"
+
+[[deps.PDMats]]
+deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
+git-tree-sha1 = "949347156c25054de2db3b166c52ac4728cbad65"
+uuid = "90014a1f-27ba-587c-ab20-58faa44d9150"
+version = "0.11.31"
 
 [[deps.Parameters]]
 deps = ["OrderedCollections", "UnPack"]
@@ -1515,6 +1755,36 @@ version = "1.39.0"
     ImageInTerminal = "d8c32880-2388-543b-8c61-d9f865259254"
     Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
+[[deps.PlutoUI]]
+deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
+git-tree-sha1 = "71a22244e352aa8c5f0f2adde4150f62368a3f2e"
+uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+version = "0.7.58"
+
+[[deps.Polynomials]]
+deps = ["LinearAlgebra", "RecipesBase", "Setfield", "SparseArrays"]
+git-tree-sha1 = "a9c7a523d5ed375be3983db190f6a5874ae9286d"
+uuid = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
+version = "4.0.6"
+
+    [deps.Polynomials.extensions]
+    PolynomialsChainRulesCoreExt = "ChainRulesCore"
+    PolynomialsFFTWExt = "FFTW"
+    PolynomialsMakieCoreExt = "MakieCore"
+    PolynomialsMutableArithmeticsExt = "MutableArithmetics"
+
+    [deps.Polynomials.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+    MakieCore = "20f20a25-4f0e-4fdf-b5d1-57303727442b"
+    MutableArithmetics = "d8a4904e-b15c-11e9-3269-09a3773c0cb0"
+
+[[deps.PositiveFactorizations]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "17275485f373e6673f7e7f97051f703ed5b15b20"
+uuid = "85a6dd25-e78a-55b7-8502-1745935b8125"
+version = "0.2.4"
+
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
 git-tree-sha1 = "03b4c25b43cb84cee5c90aa9b5ea0a78fd848d2f"
@@ -1527,15 +1797,37 @@ git-tree-sha1 = "00805cd429dcb4870060ff49ef443486c262e38e"
 uuid = "21216c6a-2e73-6563-6e65-726566657250"
 version = "1.4.1"
 
+[[deps.Primes]]
+deps = ["IntegerMathUtils"]
+git-tree-sha1 = "cb420f77dc474d23ee47ca8d14c90810cafe69e7"
+uuid = "27ebfcd6-29c5-5fa9-bf4b-fb8fc14df3ae"
+version = "0.5.6"
+
 [[deps.Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[[deps.Profile]]
+deps = ["Printf"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 
 [[deps.Qt6Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Vulkan_Loader_jll", "Xorg_libSM_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_cursor_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "libinput_jll", "xkbcommon_jll"]
 git-tree-sha1 = "37b7bb7aabf9a085e0044307e1717436117f2b3b"
 uuid = "c0090381-4147-56d7-9ebc-da0b1113ec56"
 version = "6.5.3+1"
+
+[[deps.QuadGK]]
+deps = ["DataStructures", "LinearAlgebra"]
+git-tree-sha1 = "9b23c31e76e333e6fb4c1595ae6afa74966a729e"
+uuid = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
+version = "2.9.4"
+
+[[deps.QuantEcon]]
+deps = ["DSP", "DataStructures", "Distributions", "FFTW", "Graphs", "LinearAlgebra", "Markdown", "NLopt", "Optim", "Pkg", "Primes", "Random", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "Test"]
+git-tree-sha1 = "034293b29fdbcae73aeb7ca0b2755e693f04701b"
+uuid = "fcd29c91-0bd7-5a09-975d-7ac3f643a60c"
+version = "0.16.6"
 
 [[deps.REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "Unicode"]
@@ -1574,6 +1866,18 @@ git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.3.0"
 
+[[deps.Rmath]]
+deps = ["Random", "Rmath_jll"]
+git-tree-sha1 = "f65dcb5fa46aee0cf9ed6274ccbd597adc49aa7b"
+uuid = "79098fc4-a85e-5d69-aa6a-4863f24498fa"
+version = "0.7.1"
+
+[[deps.Rmath_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "6ed52fdd3382cf21947b15e8870ac0ddbff736da"
+uuid = "f50d1b31-88e8-58de-be2c-1cc44531875f"
+version = "0.4.0+0"
+
 [[deps.Roots]]
 deps = ["ChainRulesCore", "CommonSolve", "Printf", "Setfield"]
 git-tree-sha1 = "0f1d92463a020321983d04c110f476c274bafe2e"
@@ -1611,6 +1915,10 @@ git-tree-sha1 = "e2cc6d8c88613c05e1defb55170bf5ff211fbeac"
 uuid = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 version = "1.1.1"
 
+[[deps.SharedArrays]]
+deps = ["Distributed", "Mmap", "Random", "Serialization"]
+uuid = "1a1011a3-84de-559e-8e89-a11a2f7dc383"
+
 [[deps.Showoff]]
 deps = ["Dates", "Grisu"]
 git-tree-sha1 = "91eddf657aca81df9ae6ceb20b959ae5653ad1de"
@@ -1621,6 +1929,12 @@ version = "1.0.3"
 git-tree-sha1 = "874e8867b33a00e784c8a7e4b60afe9e037b74e1"
 uuid = "777ac1f9-54b0-4bf8-805c-2214025038e7"
 version = "1.1.0"
+
+[[deps.SimpleTraits]]
+deps = ["InteractiveUtils", "MacroTools"]
+git-tree-sha1 = "5d7e3f4e11935503d3ecaf7186eac40602e7d231"
+uuid = "699a6c99-e7fa-54fc-8d76-47d257e15c1d"
+version = "0.9.4"
 
 [[deps.Sockets]]
 uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
@@ -1646,6 +1960,17 @@ weakdeps = ["ChainRulesCore"]
     [deps.SpecialFunctions.extensions]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
 
+[[deps.StaticArrays]]
+deps = ["LinearAlgebra", "PrecompileTools", "Random", "StaticArraysCore"]
+git-tree-sha1 = "bf074c045d3d5ffd956fa0a461da38a44685d6b2"
+uuid = "90137ffa-7385-5640-81b9-e52037218182"
+version = "1.9.3"
+weakdeps = ["ChainRulesCore", "Statistics"]
+
+    [deps.StaticArrays.extensions]
+    StaticArraysChainRulesCoreExt = "ChainRulesCore"
+    StaticArraysStatisticsExt = "Statistics"
+
 [[deps.StaticArraysCore]]
 git-tree-sha1 = "36b3d696ce6366023a0ea192b4cd442268995a0d"
 uuid = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
@@ -1667,6 +1992,24 @@ deps = ["DataAPI", "DataStructures", "LinearAlgebra", "LogExpFunctions", "Missin
 git-tree-sha1 = "1d77abd07f617c4868c33d4f5b9e1dbb2643c9cf"
 uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 version = "0.34.2"
+
+[[deps.StatsFuns]]
+deps = ["HypergeometricFunctions", "IrrationalConstants", "LogExpFunctions", "Reexport", "Rmath", "SpecialFunctions"]
+git-tree-sha1 = "cef0472124fab0695b58ca35a77c6fb942fdab8a"
+uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
+version = "1.3.1"
+
+    [deps.StatsFuns.extensions]
+    StatsFunsChainRulesCoreExt = "ChainRulesCore"
+    StatsFunsInverseFunctionsExt = "InverseFunctions"
+
+    [deps.StatsFuns.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
+
+[[deps.SuiteSparse]]
+deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
+uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 
 [[deps.SuiteSparse_jll]]
 deps = ["Artifacts", "Libdl", "libblastrampoline_jll"]
@@ -1701,6 +2044,11 @@ weakdeps = ["Random", "Test"]
 
     [deps.TranscodingStreams.extensions]
     TestExt = ["Test", "Random"]
+
+[[deps.Tricks]]
+git-tree-sha1 = "eae1bb484cd63b36999ee58be2de6c178105112f"
+uuid = "410a4b4d-49e4-4fbc-ab6d-cb71b17b3775"
+version = "0.1.8"
 
 [[deps.URIs]]
 git-tree-sha1 = "67db6cc7b3821e19ebe75791a9dd19c9b1188f2b"
@@ -2043,27 +2391,28 @@ version = "1.4.1+1"
 
 # ╔═╡ Cell order:
 # ╟─8b8b913e-9758-11ee-07bc-cb7712eed09d
-# ╠═d16f7d1b-b994-4950-bd57-e8b65265b445
 # ╟─c68eabcf-5846-484e-8945-bde27002cc60
-# ╟─a996ab60-337a-475c-a5d2-19a25fc1ebfc
 # ╠═fbccf6ee-5cd2-43ba-ba6a-f09fe219d803
 # ╟─58332b84-63a4-4b9d-8d7a-34d5a8d5b4c9
 # ╠═1cae17bd-4ee4-43af-bc79-5889740c1289
 # ╟─611a1c93-86fe-46db-9dd7-1882923d6ce3
 # ╠═1a7de3ab-15f3-4ce4-9ae7-5851e2fcade9
 # ╟─f21c5612-cc36-4c38-88a3-2c52d80f1e11
-# ╠═0196e8aa-b700-4b96-9453-7dd591067521
+# ╠═eedf7b40-aa00-4df2-a750-a5f6edddf627
+# ╠═37213ced-a460-40ee-9bd5-fd23d127c8f5
 # ╟─0ea09255-d6bf-4157-a4f4-f014894f96fe
 # ╠═f9d864a1-df93-4acb-b9a1-dcae9f650594
 # ╟─39444ee9-13ec-4788-8bb2-02c49f7a2416
-# ╠═2b27458d-b960-4482-a4a3-91c83eeea2fe
+# ╠═1fb98a85-34f5-43ed-9047-40e156d2e87e
+# ╠═84c86387-7c0b-4a54-b2ee-3bd369b33e5e
 # ╟─adb024cf-37d9-48bd-a8b6-5974aa23c8db
 # ╠═762af298-c4bc-400d-b8c6-7bbd135d2ffa
 # ╟─a65afbc3-15f0-40cb-9032-e249caf3176a
 # ╠═108071dd-fb5b-4c25-a062-62a00b58e55f
 # ╟─197230d2-3323-44ea-87a0-16063711ee7a
 # ╟─f2191b50-b9f7-4657-85fc-5798264873d6
-# ╠═c4b23337-d8e1-4838-abd5-2820069aead9
+# ╠═e6172cbd-a77f-4e00-b40f-596fa15caaeb
+# ╠═8e296503-bde8-4d4f-b18f-53a34e3fe8c8
 # ╟─ce219259-f7a8-43e6-89d9-de8787644046
 # ╠═229f1996-3a93-43d2-8a65-b2e80ce6b12c
 # ╟─487056aa-2c18-45a6-b343-d7c467db7a68
@@ -2071,7 +2420,8 @@ version = "1.4.1+1"
 # ╟─132054ba-478c-4429-81f5-d8846f842e2f
 # ╠═b085ffea-fb4e-4f61-a081-b546b44fbdcc
 # ╟─c76e1c3c-ded9-4fcc-971b-fd011178acae
-# ╠═7d30a56b-ab2c-43b9-a894-8aedcd115aff
+# ╠═08e8a1b7-181a-4b14-960f-511de6a94b13
+# ╠═b6a0da97-2907-4bd1-9b9a-3469734a9013
 # ╟─f30878da-9b59-4364-a8e4-8bc7ba25d42a
 # ╠═1ec7f486-5949-4762-acb6-228e09f6676d
 # ╟─1ae74070-56d4-447e-8800-e233bf3759b8
@@ -2079,5 +2429,18 @@ version = "1.4.1+1"
 # ╟─c33342e3-662a-4d33-b096-85afd7ac651c
 # ╠═988d6911-7739-47a4-92ed-b060522809db
 # ╟─37b9c4a3-d0b3-455e-819d-36531376c2cc
+# ╟─6dcbe44e-4329-47f8-b817-1913aad8fbd0
+# ╠═c763fb8e-bee0-44ff-9184-10e600bfc929
+# ╟─b5f699f9-e3c5-4e48-86d7-edbf384031c3
+# ╟─af371420-fde7-4eb8-9fa0-0c1415eb51a1
+# ╠═d16f7d1b-b994-4950-bd57-e8b65265b445
+# ╠═17c3ce8a-f6ce-4877-80e5-bcc7d5cb241f
+# ╠═e1f5de7f-2f79-4347-a5c1-5fefbca387c0
+# ╠═51910340-cd95-42d4-a86f-698524419dc1
+# ╠═289a93b3-35ef-4202-a842-8347bc75527e
+# ╠═4e059acd-8ef1-448f-84ec-068ebb8adb89
+# ╠═9db04f04-bb3b-433a-81f6-3d9f237430a9
+# ╠═ead31806-1c52-4aab-848e-10fdf2459b0a
+# ╠═6367fa56-1118-4ff7-98c1-a065ee82addd
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
