@@ -526,7 +526,7 @@ function get_steady_state(r_target,np::NumericalParameters)
 	#get distribution as (na × ns matrix)
 	D_ss = reshape(inv_dist(build_Λ(a_ss, np)),(na,ns))
 
-	return K_ss, L, w_ss, c_ss, a_ss, D_ss, np
+	return (; K_ss, L, w_ss, c_ss, a_ss, D_ss, np)
 end
 
 # ╔═╡ ce219259-f7a8-43e6-89d9-de8787644046
@@ -536,7 +536,7 @@ Now, lets get that steady state (and measure the time):
 
 # ╔═╡ 229f1996-3a93-43d2-8a65-b2e80ce6b12c
 #Now, lets get our steady state objects
-@time K_ss, L, w_ss, c_ss, a_ss, D_ss, np = 
+@time (; K_ss, L, w_ss, c_ss, a_ss, D_ss, np) = 
 	get_steady_state(0.01,NumericalParameters())
 
 # ╔═╡ 487056aa-2c18-45a6-b343-d7c467db7a68
