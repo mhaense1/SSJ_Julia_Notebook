@@ -9,7 +9,7 @@ How does this notebook differ from other resources?
 Additionally, I added a notebook that demonstrates the global Repeated Transition Method (RTM) by [Lee (2025)](https://hanbaeklee.github.io/Webpage/Lee_AggRepTrans_2025.pdf).
 (The author argues it to be a Sequence Space method but it doesn't use SSJs)
 
-To view HTML-versions of the notebook, click the links below [here](https://mhaense1.github.io/SSJ_Julia_Notebook/SSJ_notebook.html).
+To view static HTML-versions of the notebooks, click the links below.
 
 1. [First SSJ notebook](https://mhaense1.github.io/SSJ_Julia_Notebook/SSJ_notebook.html): Krusell and Smith (1998)-type economy from Auclert et al. (2021)
 
