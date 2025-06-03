@@ -1042,6 +1042,9 @@ Indeed, we see that the Jacobians obtained using the DAG method and the Direct M
 
 """
 
+# ╔═╡ 24bdcddd-af1f-430c-bed5-3cda6536f4a1
+Js[1,1]
+
 # ╔═╡ ffc02cf0-d10f-4dcb-a33a-9705ac6ccb12
 begin
 
@@ -1064,6 +1067,8 @@ md"""
 Given that it gives us what we want and seems easy, why not always use this method?
 
 The issue is that the computational cost of getting the Jacobians of $F$ is much larger with the direct method, even if we use the HA Jacobian: In terms of computation time, for my implementations the direct method takes more than 50-100 times as long as the DAG method:
+
+(Note that computation times displayed in the uploaded notebook differ from those I obtained on my laptop, as the code is run on a github server)
 """
 
 # ╔═╡ 404e75c6-77d3-48df-9376-4eaae9cc9827
@@ -1207,6 +1212,11 @@ function get_jacobs_G(Js,SS_objs)
 	F_x = kron(dG_het,Im)*J_reshaped*kron(P,Im) .+ 
 			kron(dG_X,Im) .+ kron(dG_XPrime,Imp) .+ kron(dG_Xlag,Im_)
 	F_RShock = kron(dG_RShock,Im)
+
+	test_M1 = kron(dG_X,Im) .+ kron(dG_XPrime,Imp) .+ kron(dG_Xlag,Im_)
+	test_M2 = kron(dG_het,Im)
+	test_M3 = J_reshaped
+	test_M4 = kron(P,Im) 
 	
 	return F_x, F_RShock
 
@@ -1439,7 +1449,7 @@ Everything is the same, as one would hope. And getting the aggregate Jacobians i
 
 # ╔═╡ e5a48ca3-c3b2-423a-8823-dd672941fd58
 md"""
-Finally, you may ask yourself that even though we now got the GE Jacobians for $Y$, $w$ and $\pi$, what about the other variable? Do we still need to do DAG-ing for that?
+Finally, you may ask yourself that even though we now got the GE Jacobians for $Y$, $w$ and $\pi$, what about the other variables? Do we still need to do DAG-ing for that?
 
 Of course not, we can again just write a function that gives us the remaining variables as functions of $Y$, $w$ and $\pi$ and the shocks, differentiate it and combine it with the GE Jacobian we already have. This is done by the two functions below:
 """
@@ -1548,7 +1558,7 @@ md"""
 md"""
 Overall, I feel this method provides a good compromise between the speed of the DAG method and the convenience of the Dynare-like method. 
 
-A downside compared to the former is that is perhaps not as straightforward to use what ABRS call "Solved Blocks", although it can be adapted to some extent: If it were desirable to have one such "block" in a richer version of this model, one could e.g. add an additional set of inputs named `solved_out` to `G2_fun` and then proceed similar to the HA block.
+A downside compared to the former is that it is perhaps not as straightforward to use what ABRS call "Solved Blocks", although it can be adapted to some extent: If it were desirable to have one such "block" in a richer version of this model, one could e.g. add an additional set of inputs named `solved_out` to `G2_fun` and then proceed similar to the HA block.
 """
 
 # ╔═╡ 84f43682-fb05-4b0e-aa37-c12819b4f666
@@ -1556,7 +1566,7 @@ A downside compared to the former is that is perhaps not as straightforward to u
 md"""
 ## Conclusion
 
-I hope you found this notebook useful.  If yes, please consider starring its [Github repo](https://github.com/mhaense1/SSJ_Julia_Notebook) and share it with colleagues who might also find it useful. Feedback and suggestions are also very welcome.
+I hope you found this notebook useful. If yes, please consider starring its [Github repo](https://github.com/mhaense1/SSJ_Julia_Notebook) and share it with colleagues who might also find it useful. Feedback and suggestions are also very welcome.
 
 Finally, since you seem interested in Heterogeneous Agent Macro, have a look at my [Personal Website](https://mhaense1.github.io/) to learn about my research in this area and/or to get in contact with me.
 """
@@ -3849,6 +3859,7 @@ version = "1.4.1+1"
 # ╠═12e86c4c-dbae-4095-9c79-293ba38df5dc
 # ╠═a79aebd9-44b4-4267-87bc-62b8c8723766
 # ╟─e1ec7322-f8fc-428f-85db-04ccbabf023f
+# ╠═24bdcddd-af1f-430c-bed5-3cda6536f4a1
 # ╠═ffc02cf0-d10f-4dcb-a33a-9705ac6ccb12
 # ╟─3ca6f293-b683-4c70-b9eb-93fff236b786
 # ╠═404e75c6-77d3-48df-9376-4eaae9cc9827
